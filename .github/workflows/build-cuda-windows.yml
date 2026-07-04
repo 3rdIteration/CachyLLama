@@ -184,7 +184,7 @@ jobs:
       - name: Pack artifacts
         id: pack_artifacts
         run: |
-          7z a -snl llama-bin-win-msvc-hip-x64.zip .\build\bin\Release\*
+          7z a -snl llama-bin-win-msvc-hip-x64.zip .\build\bin\*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
