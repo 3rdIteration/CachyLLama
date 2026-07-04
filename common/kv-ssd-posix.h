@@ -58,11 +58,6 @@ static inline int portable_fsync(int fd) {
 }
 #define fsync portable_fsync
 
-static inline int portable_stat(const char * path, struct stat * buf) {
-    return _stat(path, buf);
-}
-#define stat portable_stat
-
 static inline ssize_t portable_pwrite(int fd, const void * buf, size_t count, off_t offset) {
     if (_lseek(fd, offset, SEEK_SET) == -1) return -1;
     int n = _write(fd, buf, (unsigned int)count);
@@ -76,11 +71,6 @@ static inline ssize_t portable_pread(int fd, void * buf, size_t count, off_t off
     return (n < 0) ? (ssize_t)-1 : (ssize_t)n;
 }
 #define pread portable_pread
-
-static inline int portable_ftruncate(int fd, off_t length) {
-    return _chsize(fd, length);
-}
-#define ftruncate portable_ftruncate
 
 #else
 #include <unistd.h>

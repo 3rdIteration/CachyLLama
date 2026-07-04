@@ -1039,7 +1039,7 @@ uint64_t kv_ssd_find_continuation(
 
         // Parse conv_hash from directory name
         uint64_t conv_hash = 0;
-        if (sscanf(dirname.c_str(), "%016lx", &conv_hash) != 1) continue;
+        if (sscanf(dirname.c_str(), "%016" SCNx64, &conv_hash) != 1) continue;
 
         // Load the index file for this conversation
         std::string index_file = conv_dir + "/index.bin";
@@ -1128,7 +1128,7 @@ uint32_t kv_ssd_get_max_turn_id_global(const char* base_path) {
 
         // Parse conv_hash (validate 16-char hex name)
         uint64_t conv_hash_test = 0;
-        if (sscanf(dirname.c_str(), "%016lx", &conv_hash_test) != 1) continue;
+        if (sscanf(dirname.c_str(), "%016" SCNx64, &conv_hash_test) != 1) continue;
 
         std::string index_file = conv_dir + "/index.bin";
         int fd = open(index_file.c_str(), O_RDONLY);
