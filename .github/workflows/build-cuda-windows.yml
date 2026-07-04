@@ -22,10 +22,10 @@ on:
       'ggml/src/ggml-cuda/**'
     ]
 
-# note: this will run in queue with the release workflow
+# note: runs on every PR and push independently (no throttling behind release pipeline)
 concurrency:
-  group: release
-  queue: max
+  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 env:
   GH_TOKEN: ${{ github.token }}
