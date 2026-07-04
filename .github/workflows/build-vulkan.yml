@@ -1,4 +1,4 @@
-name: CI (vulkan)
+name: CI Build Binaries
 
 on:
   workflow_dispatch: # allows manual triggering
