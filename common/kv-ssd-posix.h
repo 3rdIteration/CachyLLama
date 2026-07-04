@@ -32,6 +32,7 @@ static inline int portable_mkdir(const char * path, int /*mode*/) {
 #define mkdir(path, mode) portable_mkdir(path, mode)
 
 static inline int portable_open(const char * path, int flags, ...) {
+    flags |= _O_BINARY;
     if (flags & _O_CREAT) {
         va_list args;
         va_start(args, flags);
