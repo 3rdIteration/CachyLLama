@@ -64,7 +64,9 @@ static inline int portable_fsync(int fd) {
 }
 #define fsync portable_fsync
 
-static inline ssize_t portable_pwrite(int fd, const void * buf, size_t count, off_t offset) {
+// Note: offset is int64_t, not off_t — MSVC's off_t is 32-bit (long) and
+// wraps negative past 2 GiB, which SetFilePointerEx rejects (ERROR_NEGATIVE_SEEK).
+static inline ssize_t portable_pwrite(int fd, const void * buf, size_t count, int64_t offset) {
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
     LARGE_INTEGER li;
@@ -92,7 +94,7 @@ static inline ssize_t portable_pwrite(int fd, const void * buf, size_t count, of
 }
 #define pwrite portable_pwrite
 
-static inline ssize_t portable_pread(int fd, void * buf, size_t count, off_t offset) {
+static inline ssize_t portable_pread(int fd, void * buf, size_t count, int64_t offset) {
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
     LARGE_INTEGER li;

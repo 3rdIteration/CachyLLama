@@ -73,11 +73,13 @@ static size_t get_available_ram() {
 // Chunks at 64 MiB because Windows _write/_read return int (32-bit)
 // and cannot transfer >2 GiB in a single call. Also handles platforms
 // where ssize_t is 32-bit (MinGW) and large checkpoints (>=2 GiB).
-static bool pwrite_all(int fd, const void* buf, size_t count, off_t offset) {
+// Offsets are int64_t, not off_t: MSVC's off_t is 32-bit and wraps
+// negative once a checkpoint crosses 2 GiB.
+static bool pwrite_all(int fd, const void* buf, size_t count, int64_t offset) {
     static const size_t chunk_max = 64 * 1024 * 1024; // 64 MiB
     const char* ptr = (const char*)buf;
     size_t remaining = count;
-    off_t off = offset;
+    int64_t off = offset;
     while (remaining > 0) {
         size_t chunk = remaining;
         if (chunk > chunk_max) {
@@ -101,11 +103,11 @@ static bool pwrite_all(int fd, const void* buf, size_t count, off_t offset) {
 
 // Read exactly `count` bytes from fd at offset.
 // Chunks at 64 MiB for the same reason as pwrite_all.
-static bool pread_all(int fd, void* buf, size_t count, off_t offset) {
+static bool pread_all(int fd, void* buf, size_t count, int64_t offset) {
     static const size_t chunk_max = 64 * 1024 * 1024; // 64 MiB
     char* ptr = (char*)buf;
     size_t remaining = count;
-    off_t off = offset;
+    int64_t off = offset;
     while (remaining > 0) {
         size_t chunk = remaining;
         if (chunk > chunk_max) {
@@ -505,7 +507,7 @@ static bool promote_to_hot(kv_ssd_cache* c, uint64_t id) {
 
     // Read all blobs concatenated: [tgt_data][dft_data][spec_data]
     std::vector<uint8_t> data(total_blob);
-    if (!pread_all(fd, data.data(), total_blob, (off_t)sizeof(kv_ssd_record))) {
+    if (!pread_all(fd, data.data(), total_blob, (int64_t)sizeof(kv_ssd_record))) {
         close(fd);
         return false;
     }
@@ -676,21 +678,21 @@ uint64_t kv_ssd_store(kv_ssd_cache* cache,
     }
 
     bool ok = true;
-    off_t off = 0;
+    int64_t off = 0;
     if (!pwrite_all(fd, &rec, sizeof(rec), off)) {
         int se = errno;
         LOG_WRN("SSD cache: failed to write record header: %s (errno=%d, win32_err=%lu, id=%lu, slot=%u)\n",
                 strerror(se), se, (unsigned long)portable_get_last_win32_error(), (unsigned long)id, slot_id);
         ok = false;
     }
-    off += (off_t)sizeof(kv_ssd_record);
+    off += (int64_t)sizeof(kv_ssd_record);
     if (ok && !pwrite_all(fd, data, data_size, off)) {
         int se = errno;
         LOG_WRN("SSD cache: failed to write checkpoint data: %s (errno=%d, win32_err=%lu, id=%lu, slot=%u, size=%zu, off=%jd)\n",
                 strerror(se), se, (unsigned long)portable_get_last_win32_error(), (unsigned long)id, slot_id, data_size, (intmax_t)off);
         ok = false;
     }
-    off += (off_t)data_size;
+    off += (int64_t)data_size;
     if (ok && rec.dft_data_size > 0 && !pwrite_all(fd, dft_data, rec.dft_data_size, off)) {
         int se = errno;
         LOG_WRN("SSD cache: failed to write dft data: %s (errno=%d, win32_err=%lu, id=%lu, slot=%u, size=%llu, off=%jd)\n",
@@ -698,7 +700,7 @@ uint64_t kv_ssd_store(kv_ssd_cache* cache,
                 (unsigned long long)rec.dft_data_size, (intmax_t)off);
         ok = false;
     }
-    off += (off_t)rec.dft_data_size;
+    off += (int64_t)rec.dft_data_size;
     if (ok && rec.spec_data_size > 0 && !pwrite_all(fd, spec_data, rec.spec_data_size, off)) {
         int se = errno;
         LOG_WRN("SSD cache: failed to write spec data: %s (errno=%d, win32_err=%lu, id=%lu, slot=%u, size=%llu, off=%jd)\n",

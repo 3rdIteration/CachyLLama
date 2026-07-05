@@ -25,11 +25,11 @@ namespace {
 
 // I/O helpers (duplicated minimally from kv-ssd-cache.cpp to keep
 // the system cache as a self-contained translation unit).
-bool pwrite_all(int fd, const void* buf, size_t count, off_t offset) {
+bool pwrite_all(int fd, const void* buf, size_t count, int64_t offset) {
     static const size_t chunk_max = 64 * 1024 * 1024; // 64 MiB
     const char* ptr = (const char*)buf;
     size_t remaining = count;
-    off_t off = offset;
+    int64_t off = offset;
     while (remaining > 0) {
         size_t chunk = remaining;
         if (chunk > chunk_max) {
@@ -51,11 +51,11 @@ bool pwrite_all(int fd, const void* buf, size_t count, off_t offset) {
     return true;
 }
 
-bool pread_all(int fd, void* buf, size_t count, off_t offset) {
+bool pread_all(int fd, void* buf, size_t count, int64_t offset) {
     static const size_t chunk_max = 64 * 1024 * 1024; // 64 MiB
     char* ptr = (char*)buf;
     size_t remaining = count;
-    off_t off = offset;
+    int64_t off = offset;
     while (remaining > 0) {
         size_t chunk = remaining;
         if (chunk > chunk_max) {
@@ -422,7 +422,7 @@ bool kv_ssd_system_cache::load_entry_from_disk(const std::string& filepath, kv_s
     // Read data payload
     std::vector<uint8_t> data(rec.data_size);
     if (rec.data_size > 0) {
-        if (!pread_all(fd, data.data(), rec.data_size, (off_t)sizeof(kv_ssd_system_record))) {
+        if (!pread_all(fd, data.data(), rec.data_size, (int64_t)sizeof(kv_ssd_system_record))) {
             close(fd);
             return false;
         }
@@ -466,7 +466,7 @@ bool kv_ssd_system_cache::write_entry_to_disk(const kv_ssd_system_entry& entry) 
     bool ok = pwrite_all(fd, &rec, sizeof(rec), 0);
     if (ok && entry.data.size() > 0) {
         ok = pwrite_all(fd, entry.data.data(), entry.data.size(),
-                        (off_t)sizeof(kv_ssd_system_record));
+                        (int64_t)sizeof(kv_ssd_system_record));
     }
     fsync(fd);
     close(fd);
