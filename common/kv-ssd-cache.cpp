@@ -548,6 +548,18 @@ kv_ssd_cache* kv_ssd_init(const char* path, const kv_ssd_config* cfg, uint64_t c
         size_t usable = (size_t)((double)avail * (1.0 - c->config.memory_reserve));
         c->config.hot_ram_bytes = (usable * 3) / 4;
         c->config.warm_ram_bytes = usable / 4;
+        if (c->config.unified_memory) {
+            // On unified-memory machines (iGPU, e.g. Strix Halo) host RAM,
+            // "VRAM" and these tiers all drain the same physical pool, and
+            // the tiers only save a disk read on restore - the checkpoint is
+            // always durable on disk. Cap them instead of claiming most of
+            // the free RAM the KV cache and prefill staging also need.
+            // Explicit -ssd-hot-ram / -ssd-warm-ram override auto-sizing.
+            const size_t UMA_MAX_HOT = 1024ULL * 1024 * 1024;
+            const size_t UMA_MAX_WARM = 512ULL * 1024 * 1024;
+            c->config.hot_ram_bytes = std::min(UMA_MAX_HOT, c->config.hot_ram_bytes);
+            c->config.warm_ram_bytes = std::min(UMA_MAX_WARM, c->config.warm_ram_bytes);
+        }
         const size_t MIN_HOT  = 512ULL * 1024 * 1024;
         const size_t MIN_WARM = 256ULL * 1024 * 1024;
         bool boosted = false;
@@ -559,10 +571,11 @@ kv_ssd_cache* kv_ssd_init(const char* path, const kv_ssd_config* cfg, uint64_t c
             c->config.warm_ram_bytes = MIN_WARM;
             boosted = true;
         }
-        LOG_INF("SSD cache: auto-sized hot=%zu MiB warm=%zu MiB (avail=%zu MiB)\n",
+        LOG_INF("SSD cache: auto-sized hot=%zu MiB warm=%zu MiB (avail=%zu MiB%s)\n",
                 c->config.hot_ram_bytes / 1024 / 1024,
                 c->config.warm_ram_bytes / 1024 / 1024,
-                avail / 1024 / 1024);
+                avail / 1024 / 1024,
+                c->config.unified_memory ? ", unified memory - tiers capped" : "");
         if (boosted) {
             LOG_INF("SSD cache: floors applied (min hot=%zu MiB, min warm=%zu MiB)\n",
                     MIN_HOT / 1024 / 1024, MIN_WARM / 1024 / 1024);
@@ -723,17 +736,27 @@ uint64_t kv_ssd_store(kv_ssd_cache* cache,
     write_index_file(cache);
 
     // Build combined blob: [tgt_data][dft_data][spec_data]
+    // Hot-tier retention is best effort: the checkpoint is already durable on
+    // disk, so if the blob exceeds the hot budget or host memory is exhausted
+    // we keep it cold instead of crashing or evicting the entire hot tier.
     const size_t total_blob = data_size + rec.dft_data_size + rec.spec_data_size;
-    make_room_hot(cache, total_blob);
-
-    // Store combined blob in hot cache
-    std::vector<uint8_t> hot_blob;
-    hot_blob.reserve(total_blob);
-    hot_blob.assign(data, data + data_size);
-    if (rec.dft_data_size > 0) hot_blob.insert(hot_blob.end(), dft_data, dft_data + rec.dft_data_size);
-    if (rec.spec_data_size > 0) hot_blob.insert(hot_blob.end(), spec_data, spec_data + rec.spec_data_size);
-    cache->hot_cache[id] = std::move(hot_blob);
-    cache->hot_bytes += total_blob;
+    bool hot_ok = false;
+    if (total_blob <= cache->config.hot_ram_bytes) {
+        make_room_hot(cache, total_blob);
+        try {
+            std::vector<uint8_t> hot_blob;
+            hot_blob.reserve(total_blob);
+            hot_blob.assign(data, data + data_size);
+            if (rec.dft_data_size > 0) hot_blob.insert(hot_blob.end(), dft_data, dft_data + rec.dft_data_size);
+            if (rec.spec_data_size > 0) hot_blob.insert(hot_blob.end(), spec_data, spec_data + rec.spec_data_size);
+            cache->hot_cache[id] = std::move(hot_blob);
+            cache->hot_bytes += total_blob;
+            hot_ok = true;
+        } catch (const std::bad_alloc &) {
+            LOG_WRN("SSD cache: out of host memory caching checkpoint %lu in hot tier (%zu MiB) - keeping cold\n",
+                    (unsigned long)id, total_blob / 1024 / 1024);
+        }
+    }
 
     // Build index entry
     kv_ssd_checkpoint ckpt;
@@ -747,7 +770,7 @@ uint64_t kv_ssd_store(kv_ssd_cache* cache,
     ckpt.token_hash = token_hash;
     ckpt.compat_hash = compat_hash;
     ckpt.token_count = token_count;
-    ckpt.tier = KV_TIER_HOT;
+    ckpt.tier = hot_ok ? KV_TIER_HOT : KV_TIER_COLD;
     if (token_count > 0) {
         ckpt.token_prefix.assign(rec.token_prefix, rec.token_prefix + token_count);
     }

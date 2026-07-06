@@ -1010,6 +1010,42 @@ Notes:
 - Final is strongly better for prefill across usable local MoE models.
 - Generation is mostly neutral-to-positive; small single-run negatives on MXFP4/BF16 are noise-level unless strict `-r 3` confirmation is needed.
 
+## SSD Cache on Unified-Memory Systems
+
+On Strix Halo-class APUs the BIOS carve-out leaves Windows only ~32 GB of
+host RAM while the iGPU claims the rest. At long contexts each SSD checkpoint
+store serializes the full sequence state (~0.8-1.5 GiB) into host buffers and
+then copies it again into the hot tier, spiking ~2x state size per store. Two
+problems follow:
+
+1. When the allocation fails the `bad_alloc` is uncaught and the server dies
+   silently mid-prefill (reproduced with Qwen3.5-122B-A10B at ~50k tokens).
+2. The tier auto-sizer claims 85% of free host RAM (75/25 hot/warm) for
+   caches whose only benefit is skipping an NVMe read on restore. On UMA
+   machines the tiers, host RAM and "VRAM" all drain the same physical pool,
+   so this directly starves the KV cache and prefill staging.
+
+This fork backports two fix sets from the ROCmFPX fork:
+
+- **OOM handling**: `server_ssd_cache::store/load`, `create_checkpoint`, and
+  `deferred_create_final_checkpoint` now catch `std::bad_alloc` and skip the
+  store / fall back to prompt reprocessing instead of terminating. In
+  `kv_ssd_store()` the hot-tier retention is best-effort: it is skipped when
+  the blob exceeds the hot budget or the copy throws `bad_alloc`, and the
+  checkpoint tier flag is set to `COLD` on failure (the checkpoint is already
+  durable on disk).
+- **Unified-memory detection + conservative caps**: The server detects UMA
+  via the ggml device registry (`IGPU` present, `GPU` absent) and logs
+  `SSD cache: unified-memory (iGPU) system detected` at startup. When
+  detected, the auto-sizer is capped at 1 GiB hot / 512 MiB warm instead of
+  scaling with free RAM. Explicit `--cache-ssd-hot-ram` / `--cache-ssd-warm-ram`
+  always override auto-sizing. A latent bug where explicit values were
+  silently overwritten is also fixed.
+
+**Recommended UMA settings for long-context use**: `--cache-ssd-hot-ram 256`
+`--cache-ssd-warm-ram 128` (or smaller) to keep the tiers minimal and leave
+headroom for the KV cache and prefill staging.
+
 ## Blockers and Annoyances
 
 `tbx`:

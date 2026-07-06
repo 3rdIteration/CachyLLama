@@ -391,6 +391,18 @@ This means:
 Existing deployments are not migrated. The `u/` namespace is a
 new subdirectory; existing `conv_hash` directories are untouched.
 
+### Unified-memory systems
+
+On unified-memory machines (AMD Strix Halo-class APUs) the BIOS carve-out
+can dedicate most physical RAM to the iGPU, leaving the host with a small
+pool. The server detects this automatically (an integrated GPU with no
+discrete GPU present) and caps the SSD cache tier auto-sizer at 1 GiB hot /
+512 MiB warm there, logging `SSD cache: unified-memory (iGPU) system detected`
+at startup. On machines with a discrete GPU the auto-sizer keeps its original
+behavior and scales the tiers with free host RAM. Explicit
+`--cache-ssd-hot-ram` / `--cache-ssd-warm-ram` values always win over
+auto-sizing on either kind of machine.
+
 ### Per-user concurrency cap
 
 Set the cap on the server with `--max-concurrent-per-user N` (0 =
